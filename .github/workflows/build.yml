@@ -34,7 +34,7 @@ jobs:
       run: pip install "torch==2.1.0+cpu" --index-url http://download.pytorch.org/whl/cpu
 
     - name: Install build tools
-      run: pip install pyyaml setuptools auditwheel
+      run: pip install pyyaml setuptools auditwheel numpy==1.23.2
 
     - name: Clone Ascend/pytorch
       run: |

@@ -57,7 +57,7 @@ pip install --upgrade pip
 pip install "torch==2.1.0+cpu" --index-url http://download.pytorch.org/whl/cpu
 
 # 安装构建工具
-pip install pyyaml setuptools auditwheel
+pip install pyyaml setuptools auditwheel numpy==1.23.2
 ```
 
 | 包名 | 版本 | 用途 |
@@ -66,6 +66,7 @@ pip install pyyaml setuptools auditwheel
 | `pyyaml` | latest | 解析 YAML 配置文件 |
 | `setuptools` | latest | Python 包构建工具 |
 | `auditwheel` | latest | 检查和修复 wheel 包兼容性 |
+| `numpy` | 1.23.2 | 数值计算库，构建依赖 |
 
 ### 4. 源码仓库
 
@@ -133,7 +134,7 @@ source venv/bin/activate
 # 4. 安装 Python 依赖
 pip install --upgrade pip
 pip install "torch==2.1.0+cpu" --index-url http://download.pytorch.org/whl/cpu
-pip install pyyaml setuptools auditwheel
+pip install pyyaml setuptools auditwheel numpy==1.23.2
 
 # 5. 克隆本仓库
 git clone https://github.com/kerer-ai/pytorch-npu-trae.git
