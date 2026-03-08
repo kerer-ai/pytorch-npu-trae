@@ -1,0 +1,82 @@
+name: Build pytorch-npu
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends \
+          cmake \
+          ninja-build \
+          gcc \
+          g++ \
+          git \
+          patchelf
+
+    - name: Upgrade pip
+      run: pip install --upgrade pip
+
+    - name: Install PyTorch 2.1.0+cpu
+      run: pip install "torch==2.1.0+cpu" --index-url http://download.pytorch.org/whl/cpu
+
+    - name: Install build tools
+      run: pip install pyyaml setuptools auditwheel
+
+    - name: Clone Ascend/pytorch
+      run: |
+        git clone --depth=1 --recurse-submodules \
+          https://github.com/Ascend/pytorch.git ascend_pytorch
+
+    - name: Apply patches
+      run: |
+        if [ -d "patches" ]; then
+          for p in patches/*.patch; do
+            [ -f "$p" ] || continue
+            echo "Applying patch: $(basename $p)"
+            git apply --directory=ascend_pytorch "$p"
+          done
+        else
+          echo "No patches directory found, skipping patch application"
+        fi
+
+    - name: Build wheel
+      run: |
+        cd ascend_pytorch
+        export DISABLE_INSTALL_TORCHAIR=TRUE
+        export DISABLE_RPC_FRAMEWORK=TRUE
+        export BUILD_WITHOUT_SHA=1
+        python setup.py build bdist_wheel
+
+    - name: List built wheel
+      run: ls -la ascend_pytorch/dist/*.whl
+
+    - name: Upload build log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log
+        path: |
+          ascend_pytorch/dist/*.whl
+        retention-days: 7
+
+    - name: Get PyTorch version
+      run: python -c "import torch; print(f'PyTorch version: {torch.__version__}')"
+
+    - name: Get Ascend/pytorch commit
+      run: |
+        cd ascend_pytorch
+        echo "Ascend/pytorch commit: $(git rev-parse HEAD)"
