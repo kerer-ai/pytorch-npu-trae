@@ -2,28 +2,15 @@ From: CI Bot <ci@example.com>
 Date: Sat, 8 Mar 2026 12:00:00 +0000
 Subject: [PATCH] fix: adapt to PyTorch nightly CachingHostAllocator API changes
 
-PyTorch nightly changed the CachingHostAllocator API:
-- HostBlockPool::blocks renamed to blocks_
-- HostBlockPool removed the unmapped member
-- process_events() signature changed to require BlockPool& parameter
-
-The base class CachingHostAllocatorImpl now defines BlockPool as a typedef
-to HostBlockPool, which conflicts with the local BlockPool struct defined
-in this file. This patch:
-1. Renames the local BlockPool to ExpandableBlockPool
-2. Removes the override marker from process_events() since the signature changed
-
 ---
- .../core/npu/CachingHostAllocator.cpp         | 60 +++++++++----------
- 1 file changed, 30 insertions(+), 30 deletions(-)
+ .../core/npu/CachingHostAllocator.cpp         | 58 +++++++++----------
+ 1 file changed, 29 insertions(+), 29 deletions(-)
 
 diff --git a/torch_npu/csrc/core/npu/CachingHostAllocator.cpp b/torch_npu/csrc/core/npu/CachingHostAllocator.cpp
 index 1234567..abcdefg 100644
 --- a/torch_npu/csrc/core/npu/CachingHostAllocator.cpp
 +++ b/torch_npu/csrc/core/npu/CachingHostAllocator.cpp
-@@ -49,9 +49,9 @@ using Comparison = bool (*)(const ExpandableBlock *, const ExpandableBlock *);
- static bool BlockComparatorSize(const ExpandableBlock *a, const ExpandableBlock *b);
- static bool BlockComparatorAddress(const ExpandableBlock *a, const ExpandableBlock *b);
+@@ -49,9 +49,9 @@ static bool BlockComparatorAddress(const ExpandableBlock *a, const ExpandableBlo
  
 -struct BlockPool {
 +struct ExpandableBlockPool {
