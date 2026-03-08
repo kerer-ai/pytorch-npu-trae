@@ -1,0 +1,147 @@
+name: Nightly Build
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      torch_date:
+        description: 'PyTorch nightly date (YYYYMMDD format, e.g., 20260308)'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build \
+            gcc \
+            g++ \
+            git \
+            patchelf
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          if [ -n "${{ github.event.inputs.torch_date }}" ]; then
+            pip install --pre "torch==2.11.0.dev${{ github.event.inputs.torch_date }}" \
+              --index-url https://download.pytorch.org/whl/nightly/cpu
+          else
+            pip install --pre torch \
+              --index-url https://download.pytorch.org/whl/nightly/cpu
+          fi
+          pip install pyyaml setuptools auditwheel
+
+      - name: Get PyTorch version info
+        id: torch-info
+        run: |
+          TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
+          TORCH_DATE=$(python -c "import torch; v=torch.__version__; print(v.split('dev')[1] if 'dev' in v else 'unknown')")
+          echo "version=$TORCH_VERSION" >> $GITHUB_OUTPUT
+          echo "date=$TORCH_DATE" >> $GITHUB_OUTPUT
+          echo "PyTorch version: $TORCH_VERSION"
+          echo "PyTorch date: $TORCH_DATE"
+
+      - name: Clone Ascend/pytorch
+        run: |
+          git clone --depth=1 --recurse-submodules \
+            https://github.com/Ascend/pytorch.git ascend_pytorch
+          echo "ASCEND_COMMIT=$(cd ascend_pytorch && git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      - name: Apply compatibility patches
+        run: |
+          PATCH_DIR="./patches"
+          if [ -d "$PATCH_DIR" ]; then
+            for p in "${PATCH_DIR}"/*.patch; do
+              [ -f "$p" ] || continue
+              echo "Applying patch: $(basename $p)"
+              if git apply --directory=ascend_pytorch "$p"; then
+                echo "✅ OK: $(basename $p)"
+              else
+                echo "❌ FAILED: $(basename $p)"
+              fi
+            done
+          else
+            echo "No patches directory found"
+          fi
+
+      - name: Build CANN stub libraries
+        run: |
+          cd ascend_pytorch/third_party/acl/libs
+          chmod +x build_stub.sh
+          ./build_stub.sh
+
+      - name: Build wheel package
+        env:
+          DISABLE_INSTALL_TORCHAIR: TRUE
+          DISABLE_RPC_FRAMEWORK: TRUE
+          BUILD_WITHOUT_SHA: 1
+        run: |
+          cd ascend_pytorch
+          python setup.py build bdist_wheel 2>&1 | tee build.log
+          echo "BUILD_EXIT_CODE=${PIPESTATUS[0]}" >> $GITHUB_ENV
+
+      - name: Check build result
+        run: |
+          if [ "${{ env.BUILD_EXIT_CODE }}" != "0" ]; then
+            echo "Build failed with exit code ${{ env.BUILD_EXIT_CODE }}"
+            exit 1
+          fi
+          if [ -f "ascend_pytorch/dist/*.whl" ]; then
+            echo "Build succeeded!"
+            ls -la ascend_pytorch/dist/*.whl
+          else
+            echo "No wheel file found"
+            exit 1
+          fi
+
+      - name: Upload build log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-log
+          path: ascend_pytorch/build.log
+          retention-days: 7
+
+      - name: Upload wheel package
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: wheel-package
+          path: ascend_pytorch/dist/*.whl
+          retention-days: 7
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| PyTorch Version | ${{ steps.torch-info.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| PyTorch Date | ${{ steps.torch-info.outputs.date }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Ascend/pytorch Commit | ${{ env.ASCEND_COMMIT }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Applied Patches" >> $GITHUB_STEP_SUMMARY
+          if [ -d "./patches" ]; then
+            for p in ./patches/*.patch; do
+              [ -f "$p" ] && echo "- $(basename $p)" >> $GITHUB_STEP_SUMMARY
+            done
+          else
+            echo "No patches found" >> $GITHUB_STEP_SUMMARY
+          fi
