@@ -2,15 +2,26 @@ From: CI Bot <ci@example.com>
 Date: Sat, 8 Mar 2026 12:00:00 +0000
 Subject: [PATCH] fix: adapt to PyTorch nightly CachingHostAllocator API changes
 
+PyTorch nightly changed the CachingHostAllocator API:
+- HostBlockPool::blocks renamed to blocks_
+- HostBlockPool removed the unmapped member
+- process_events() signature changed to require BlockPool& parameter
+
+The base class CachingHostAllocatorImpl now defines BlockPool as a typedef
+to HostBlockPool, which conflicts with the local BlockPool struct defined
+in this file. This patch:
+1. Renames the local BlockPool to ExpandableBlockPool
+2. Removes the override marker from process_events() since the signature changed
+
 ---
- .../core/npu/CachingHostAllocator.cpp         | 58 +++++++++----------
- 1 file changed, 29 insertions(+), 29 deletions(-)
+ .../core/npu/CachingHostAllocator.cpp         | 60 +++++++++----------
+ 1 file changed, 30 insertions(+), 30 deletions(-)
 
 diff --git a/torch_npu/csrc/core/npu/CachingHostAllocator.cpp b/torch_npu/csrc/core/npu/CachingHostAllocator.cpp
 index 1234567..abcdefg 100644
 --- a/torch_npu/csrc/core/npu/CachingHostAllocator.cpp
 +++ b/torch_npu/csrc/core/npu/CachingHostAllocator.cpp
-@@ -47,9 +47,9 @@ using Comparison = bool (*)(const ExpandableBlock *, const ExpandableBlock *);
+@@ -49,9 +49,9 @@ using Comparison = bool (*)(const ExpandableBlock *, const ExpandableBlock *);
  static bool BlockComparatorSize(const ExpandableBlock *a, const ExpandableBlock *b);
  static bool BlockComparatorAddress(const ExpandableBlock *a, const ExpandableBlock *b);
  
@@ -32,7 +43,7 @@ index 1234567..abcdefg 100644
      bool mapped{ true };    // is the virtual address range this Block references
                              // backed by physical pages. Always true when
                              // expandable_segment_ is null. When false
-@@ -73,7 +73,7 @@ struct ExpandableBlock : at::HostBlock<c10_npu::NPUStream>{
+@@ -75,7 +75,7 @@ struct ExpandableBlock : at::HostBlock<c10_npu::NPUStream>{
            next(nullptr)
          {}
  
@@ -41,7 +52,7 @@ index 1234567..abcdefg 100644
          : HostBlock(size, ptr),
            pool(pool),
            prev(nullptr),
-@@ -315,7 +315,7 @@ struct SegmentRange {
+@@ -407,7 +407,7 @@ struct SegmentRange {
  };
  
  struct ExpandableSegment {
@@ -50,7 +61,7 @@ index 1234567..abcdefg 100644
      {
          auto begin = segmentLeft(range.ptr);
          auto end = segmentRight(range.ptr + range.size);
-@@ -547,7 +547,7 @@ struct ExpandableSegment {
+@@ -546,7 +546,7 @@ struct ExpandableSegment {
  };
  
  struct AllocParams {
@@ -59,7 +70,7 @@ index 1234567..abcdefg 100644
          : search_key(size),
            pool(pool),
            err(ACL_ERROR_NONE)
-@@ -560,7 +560,7 @@ struct AllocParams {
+@@ -559,7 +559,7 @@ struct AllocParams {
  
      ExpandableBlock search_key;
  
@@ -68,7 +79,7 @@ index 1234567..abcdefg 100644
  
      ExpandableBlock *block{};
  
-@@ -623,7 +623,7 @@ private:
+@@ -688,7 +688,7 @@ struct NPUExpandableHostAllocatorImpl : public NPUCachingHostAllocatorImpl {
      std::vector<c10::RefPtr<ExpandableSegment>> expandable_segments_;
      std::vector<c10::RefPtr<ExpandableSegment>> unmapped_segments_;
  
@@ -77,7 +88,7 @@ index 1234567..abcdefg 100644
  
      std::mutex mutex;
  
-@@ -841,7 +841,7 @@ private:
+@@ -840,7 +840,7 @@ struct NPUExpandableHostAllocatorImpl : public NPUCachingHostAllocatorImpl {
      }
  
      /* * combine previously split blocks. returns the size of the subsumed block, or 0 on failure. * */
@@ -86,7 +97,16 @@ index 1234567..abcdefg 100644
      {
          if (!src || src->allocated_ || src->event_count_ > 0 || !src->streams_.empty() || dst->mapped != src->mapped) {
              return 0;
-@@ -974,7 +974,7 @@ private:
+@@ -888,7 +888,7 @@ struct NPUExpandableHostAllocatorImpl : public NPUCachingHostAllocatorImpl {
+         pool.blocks.insert(block);
+     }
+ 
+-    void process_events() override
++    void process_events()
+     {
+         while (true) {
+             // Avoid calling cudaEventDestroy while holding a mutex, so move
+@@ -973,7 +973,7 @@ struct NPUExpandableHostAllocatorImpl : public NPUCachingHostAllocatorImpl {
  
      bool get_free_expandable_block(AllocParams &p)
      {
@@ -95,7 +115,7 @@ index 1234567..abcdefg 100644
          auto it = pool.blocks.lower_bound(&p.search_key);
          if (it == pool.blocks.end()) {
              return false;
-@@ -1012,7 +1012,7 @@ private:
+@@ -1015,7 +1015,7 @@ struct NPUExpandableHostAllocatorImpl : public NPUCachingHostAllocatorImpl {
      // returns the smallest possible address in any segment
      // where there is enough free address space to fit size
      // may be composed of free and unmapped segments
@@ -104,7 +124,7 @@ index 1234567..abcdefg 100644
      {
          ExpandableBlock key(0);
  
-@@ -1102,7 +1102,7 @@ private:
+@@ -1064,7 +1064,7 @@ struct NPUExpandableHostAllocatorImpl : public NPUCachingHostAllocatorImpl {
          return candidate;
      }
  
@@ -113,7 +133,7 @@ index 1234567..abcdefg 100644
      {
          TORCH_INTERNAL_ASSERT(!to_map->mapped && size <= to_map->size_, PTA_ERROR(ErrCode::VALUE));
  
-@@ -1121,7 +1121,7 @@ private:
+@@ -1076,7 +1076,7 @@ struct NPUExpandableHostAllocatorImpl : public NPUCachingHostAllocatorImpl {
              PTA_ERROR(ErrCode::INTERNAL));
  
          to_map->mapped = true;
@@ -122,7 +142,7 @@ index 1234567..abcdefg 100644
  
          if (mapped_range.size < to_map->size_) {
              // to_map -> remaining -> to_map->next(?)
-@@ -1149,7 +1149,7 @@ private:
+@@ -1101,7 +1101,7 @@ struct NPUExpandableHostAllocatorImpl : public NPUCachingHostAllocatorImpl {
          return true;
      }
  
