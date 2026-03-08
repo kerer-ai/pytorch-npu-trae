@@ -74,7 +74,7 @@ jobs:
         retention-days: 7
 
     - name: Get PyTorch version
-      run: python -c "import torch; print(f'PyTorch version: {torch.__version__}')"
+      run: python -c 'import torch; print(f"PyTorch version: {torch.__version__}")'
 
     - name: Get Ascend/pytorch commit
       run: |
