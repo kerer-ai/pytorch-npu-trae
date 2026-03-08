@@ -2,25 +2,16 @@ From: CI Bot <ci@example.com>
 Date: Sat, 8 Mar 2026 12:00:00 +0000
 Subject: [PATCH] fix: adapt to PyTorch nightly CachingHostAllocator API changes
 
-PyTorch nightly changed the CachingHostAllocator API:
-- HostBlockPool::blocks renamed to blocks_
-- HostBlockPool removed the unmapped member
-- process_events() signature changed to require BlockPool& parameter
-
-The base class CachingHostAllocatorImpl now defines BlockPool as a typedef
-to HostBlockPool, which conflicts with the local BlockPool struct defined
-in this file. This patch renames the local BlockPool to ExpandableBlockPool
-to avoid the name collision.
-
 ---
- torch_npu/csrc/core/npu/CachingHostAllocator.cpp | 78 ++++++++++++------------
- 1 file changed, 39 insertions(+), 39 deletions(-)
+ .../core/npu/CachingHostAllocator.cpp         | 58 +++++++++----------
+ 1 file changed, 29 insertions(+), 29 deletions(-)
 
 diff --git a/torch_npu/csrc/core/npu/CachingHostAllocator.cpp b/torch_npu/csrc/core/npu/CachingHostAllocator.cpp
 index 1234567..abcdefg 100644
 --- a/torch_npu/csrc/core/npu/CachingHostAllocator.cpp
 +++ b/torch_npu/csrc/core/npu/CachingHostAllocator.cpp
-@@ -43,9 +43,9 @@ static bool BlockComparatorSize(const ExpandableBlock *a, const ExpandableBlock
+@@ -47,9 +47,9 @@ using Comparison = bool (*)(const ExpandableBlock *, const ExpandableBlock *);
+ static bool BlockComparatorSize(const ExpandableBlock *a, const ExpandableBlock *b);
  static bool BlockComparatorAddress(const ExpandableBlock *a, const ExpandableBlock *b);
  
 -struct BlockPool {
@@ -32,7 +23,7 @@ index 1234567..abcdefg 100644
      }
  };
  
-@@ -56,7 +56,7 @@ struct ExpandableSegment;
+@@ -60,7 +60,7 @@ struct ExpandableSegment;
  
  struct ExpandableBlock : at::HostBlock<c10_npu::NPUStream>{
      size_t requested_size{};  // memory originally requested
@@ -41,7 +32,7 @@ index 1234567..abcdefg 100644
      bool mapped{ true };    // is the virtual address range this Block references
                              // backed by physical pages. Always true when
                              // expandable_segment_ is null. When false
-@@ -69,7 +69,7 @@ struct ExpandableBlock : at::HostBlock<c10_npu::NPUStream>{
+@@ -73,7 +73,7 @@ struct ExpandableBlock : at::HostBlock<c10_npu::NPUStream>{
            next(nullptr)
          {}
  
@@ -50,7 +41,7 @@ index 1234567..abcdefg 100644
          : HostBlock(size, ptr),
            pool(pool),
            prev(nullptr),
-@@ -311,7 +311,7 @@ struct SegmentRange {
+@@ -315,7 +315,7 @@ struct SegmentRange {
  };
  
  struct ExpandableSegment {
@@ -59,18 +50,16 @@ index 1234567..abcdefg 100644
      {
          auto begin = segmentLeft(range.ptr);
          auto end = segmentRight(range.ptr + range.size);
-@@ -543,8 +543,8 @@ struct ExpandableSegment {
+@@ -547,7 +547,7 @@ struct ExpandableSegment {
  };
  
  struct AllocParams {
 -    AllocParams(size_t size, BlockPool *pool)
--        : search_key(size),
 +    AllocParams(size_t size, ExpandableBlockPool *pool)
-+        : search_key(size),
+         : search_key(size),
            pool(pool),
            err(ACL_ERROR_NONE)
-     {}
-@@ -556,7 +556,7 @@ struct AllocParams {
+@@ -560,7 +560,7 @@ struct AllocParams {
  
      ExpandableBlock search_key;
  
@@ -79,29 +68,25 @@ index 1234567..abcdefg 100644
  
      ExpandableBlock *block{};
  
-@@ -619,7 +619,7 @@ private:
+@@ -623,7 +623,7 @@ private:
+     std::vector<c10::RefPtr<ExpandableSegment>> expandable_segments_;
+     std::vector<c10::RefPtr<ExpandableSegment>> unmapped_segments_;
+ 
 -    BlockPool blocks_pool;
 +    ExpandableBlockPool blocks_pool;
  
      std::mutex mutex;
  
-@@ -837,7 +837,7 @@ private:
+@@ -841,7 +841,7 @@ private:
+     }
+ 
      /* * combine previously split blocks. returns the size of the subsumed block, or 0 on failure. * */
 -    size_t try_merge_blocks(ExpandableBlock *dst, ExpandableBlock *src, BlockPool &pool)
 +    size_t try_merge_blocks(ExpandableBlock *dst, ExpandableBlock *src, ExpandableBlockPool &pool)
      {
          if (!src || src->allocated_ || src->event_count_ > 0 || !src->streams_.empty() || dst->mapped != src->mapped) {
              return 0;
-@@ -885,7 +885,7 @@ private:
-     void process_events()
-     {
-         while (true) {
--            // Avoid calling cudaEventDestroy while holding a mutex, so move
-+            // Avoid calling event destroy while holding a mutex, so move
-             // intermediate events out of the lock into this object.
-             // process the last event
-             std::optional<std::pair<EventPool::Event, ExpandableBlock*>> processed;
-@@ -970,7 +970,7 @@ private:
+@@ -974,7 +974,7 @@ private:
  
      bool get_free_expandable_block(AllocParams &p)
      {
@@ -110,7 +95,7 @@ index 1234567..abcdefg 100644
          auto it = pool.blocks.lower_bound(&p.search_key);
          if (it == pool.blocks.end()) {
              return false;
-@@ -1008,7 +1008,7 @@ private:
+@@ -1012,7 +1012,7 @@ private:
      // returns the smallest possible address in any segment
      // where there is enough free address space to fit size
      // may be composed of free and unmapped segments
@@ -119,7 +104,7 @@ index 1234567..abcdefg 100644
      {
          ExpandableBlock key(0);
  
-@@ -1098,7 +1098,7 @@ private:
+@@ -1102,7 +1102,7 @@ private:
          return candidate;
      }
  
@@ -128,7 +113,7 @@ index 1234567..abcdefg 100644
      {
          TORCH_INTERNAL_ASSERT(!to_map->mapped && size <= to_map->size_, PTA_ERROR(ErrCode::VALUE));
  
-@@ -1117,7 +1117,7 @@ private:
+@@ -1121,7 +1121,7 @@ private:
              PTA_ERROR(ErrCode::INTERNAL));
  
          to_map->mapped = true;
@@ -137,7 +122,7 @@ index 1234567..abcdefg 100644
  
          if (mapped_range.size < to_map->size_) {
              // to_map -> remaining -> to_map->next(?)
-@@ -1145,7 +1145,7 @@ private:
+@@ -1149,7 +1149,7 @@ private:
          return true;
      }
  
